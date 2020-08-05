@@ -163,14 +163,6 @@ def main():
             'companies.csv'
             ), index=None, header=True)
         
-        """"""""""""
-        companies.to_excel(
-            os.path.join(
-            'tables',
-            'companies.xlsx'
-            ), index=None, header=True)
-        """"""""""""
-        
         print("> Новое отношение 'Компании' успешно сформированно и сохранено.")
     except:
         print(f">>> Проблема с формированием отношения 'Компании'. Завершение работы.")
@@ -226,14 +218,6 @@ def main():
             'vacancies.csv'
             ), index=None, header=True)
         
-        """"""""""""
-        vacancies.to_excel(
-            os.path.join(
-            'tables',
-            'vacancies.xlsx'
-            ), index=None, header=True)
-        """"""""""""
-        
         print("> Новое отношение 'Вакансии' успешно сформированно и сохранено.")
     except:
         print(f">>> Проблема с формированием отношения 'Вакансии'. Завершение работы.")
@@ -244,26 +228,29 @@ def main():
     try:
         # используем сортировку по убыванию кодов для дальнейшего удобного сопастовления
         mrigo_query = """
-        SELECT DISTINCT data.vf_btr_lines.id_mrigo, data.vf_btr_lines.mrigo
-        FROM data.vf_btr_lines
-        ORDER BY 1 DESC
+        SELECT DISTINCT blinov.mrigo.id_mrigo, blinov.mrigo.mrigo
+        FROM blinov.mrigo
         """
-        id_mrigo_mrigo = db.get_table_from_query(mrigo_query)
-        id_mrigo_mrigo.to_csv(os.path.join(
+        mrigo_id_name = db.get_table_from_query(mrigo_query)
+        mrigo_id_name.to_csv(os.path.join(
             'tables', 'id_mrigo_mrigo.csv'), index=None, header=True)
         print(f"\n> Таблица с кодами и наименованиям МРИГО успешно загружена.")
 
         okptdr_query = """
-                    SELECT data.okpdtr.id, data.okpdtr.name
-                    FROM data.okpdtr
-                    ORDER BY 1
+                    SELECT blinov.okpdtr.id, blinov.okpdtr.name
+                    FROM blinov.okpdtr
                     """
-        id_okpdtr_okpdtr = db.get_table_from_query(okptdr_query)
-        id_okpdtr_okpdtr.to_csv(os.path.join(
-            'tables', 'id_okpdtr_okpdtr.csv'), index=None, header=True)
+        okpdtr_id_name = db.get_table_from_query(okptdr_query)
+        okpdtr_id_name.to_csv(os.path.join('tables', 'id_okpdtr_okpdtr.csv'), index=None, header=True)
+        okptdr_assoc_query = """
+                    SELECT blinov.okpdtr_assoc.id, blinov.okpdtr_assoc.name
+                    FROM blinov.okpdtr_assoc;
+                    """
+        okpdtr_assoc_id_name = db.get_table_from_query(okptdr_assoc_query)
+        okpdtr_assoc_id_name.to_csv(os.path.join('tables', 'id_okpdtr_okpdtr_assoc.csv'), index=None, header=True) 
         print(f"> Таблица с кодами и наименованиям ОКПДТР успешно загружена.")
     except:
-        print(f"> Нет доступа к БД в данный момент. Заверешение работы.")
+        print(f"> Нет доступа к БД в данный момент, либо проблемы с формулировкой запроса. Заверешение работы.")
         sys.exit(7)  
 
 if __name__ == "__main__":
