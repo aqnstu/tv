@@ -23,7 +23,7 @@ def main():
     # если уже есть отношение 'Компании' в БД
     if flag_companies:
         print("Отношение 'Компании' уже содержится в БД. Добавление новых записей...")
-        companies_tv_new = pd.read_csv(
+        companies = pd.read_csv(
             os.path.join(
                 'tables',
                 'companies.csv'
@@ -31,9 +31,9 @@ def main():
             dtype=object
             )
 
-        cond = companies_tv_new['ogrn'].isin(companies_tv_old['ogrn'])
-        companies_tv_diff = companies_tv_new.drop(
-            companies_tv_new[cond].index,
+        cond = companies['ogrn'].isin(companies_tv_old['ogrn'])
+        companies_tv_diff = companies.drop(
+            companies[cond].index,
             inplace=False
             ).reset_index().drop(
                 ['index'],
@@ -62,7 +62,6 @@ def main():
         companies_tv_diff = companies_tv_diff.replace({np.nan: None})
         if not companies_tv_diff.empty:
             print(f"Число новых компаний для обновления -- {companies_tv_diff.shape[0]}")
-
             companies_tv_diff.to_sql(
                 'companies_tv',
                 con=db.engine,
@@ -146,7 +145,7 @@ def main():
     # если уже есть отношение 'Вакансии' в БД
     if flag_vacancies:
         print("Отношение 'Вакансии' уже содержится в БД. Добавление новых записей, если они есть...")
-        vacancies_tv_new = pd.read_csv(
+        vacancies = pd.read_csv(
             os.path.join(
                 'tables',
                 'vacancies_updated.csv'
@@ -154,9 +153,9 @@ def main():
             dtype=object
             )
 
-        cond = vacancies_tv_new['ogrn'].isin(vacancies_tv_old['ogrn'])
-        vacancies_tv_diff = vacancies_tv_new.drop(
-            vacancies_tv_new[cond].index,
+        cond = vacancies['ogrn'].isin(vacancies_tv_old['ogrn'])
+        vacancies_tv_diff = vacancies.drop(
+            vacancies[cond].index,
             inplace=False
             ).reset_index().drop(
                 ['index'],
@@ -222,8 +221,10 @@ def main():
                     'salary': sa.String,
                     'currency': sa.String,
                     'vac_url': sa.String,
-                    'creation-date': sa.String,    # sa.DateTime,
-                    'modify-date': sa.String,      # sa.DateTime,
+                    'creation-date-from-api' : sa.DateTime,    # sa.DateTime,
+                    'modify-modify-date-from-api' : sa.DateTime,      # sa.DateTime,
+                    'download_time': sa.DateTime,
+                    'is_closed': sa.Boolean,
                 })
             print("Выгрузка новых данных в таблицу 'Вакансии' завершена.")
         else:
@@ -276,8 +277,11 @@ def main():
                 'salary' : sa.String,
                 'currency' : sa.String,
                 'vac_url' : sa.String,
-                'creation-date' : sa.String,    # sa.DateTime,
-                'modify-date' : sa.String,      # sa.DateTime,
+                'creation-date-from-api' : sa.DateTime,           # sa.DateTime,
+                'modify-modify-date-from-api' : sa.DateTime,      # sa.DateTime,
+                'download_time': sa.DateTime,
+                'is_closed': sa.Boolean,
+                
             })
         db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD PRIMARY KEY(id)')
         db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_comp_f_key FOREIGN KEY (ogrn) REFERENCES blinov.companies_tv (ogrn)')
