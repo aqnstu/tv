@@ -26,7 +26,17 @@ from fuzzywuzzy import process
 
 import misc.db as db
 import misc.okpdtr_splits as oks
-import misc.secondary_funcs as sf
+
+
+def find_locate_max(lst):
+    """
+    Поиск наибольшего значения в списке.
+
+    Входные параметры:
+    lst -- список с числами
+    """
+    biggest = max(lst)
+    return biggest, [index for index, element in enumerate(lst) if biggest == element]
 
 
 def remove_tags(text):
@@ -67,7 +77,7 @@ def get_data_from_api(start_offset):
     """
     df_raw = pd.DataFrame()
     offset = start_offset
-    print("> Загрузка данных через API TRUDVSEM...")
+    print(">> Загрузка данных через API TRUDVSEM...")
     while True:
         # print(f">> Текущая страница: -- {offset}")
         data, status = get_page_from_api(offset)
@@ -78,13 +88,15 @@ def get_data_from_api(start_offset):
         df_tmp = pd.io.json.json_normalize(new_data)
         df_raw = pd.concat([df_raw, df_tmp], sort=False, ignore_index=True)
         offset += 1
-    print("> Загрузка данных через API TRUDVSEM заверешна.")
+    print(">> Загрузка данных через API TRUDVSEM заверешна.")
     return df_raw
 
 
 def main():
     ################################
     '''получение данных через API'''
+    ################################
+    print(f"> Получение данных:")
     start = time.time()
     # получение "сырого" датафрейма с вакансиями
     try:
@@ -107,10 +119,17 @@ def main():
             'vacancy.duty': 'str',
             'vacancy.requirement.qualification': 'str',
         })
-        df_raw = df_raw.replace({False: np.nan, np.nan: None})
+        for index, row in df_raw.iterrows():
+            df_raw.at[index, 'vacancy.addresses.address'] = re.sub(
+                "'location': |{|\[|lng': |'lat': |}|\]|\'", '', df_raw.at[index, 'vacancy.addresses.address'])
+            df_raw.at[index, 'vacancy.duty'] = remove_tags(
+                df_raw.at[index, 'vacancy.duty'])
+            df_raw.at[index, 'vacancy.requirement.qualification'] = remove_tags(
+                df_raw.at[index, 'vacancy.requirement.qualification'])
+        df_raw = df_raw.replace({False: np.nan})
         df_raw['download_time'] = pd.to_datetime('now')
-        if not os.path.exists('tables'):
-            os.makedirs('tables')
+        # if not os.path.exists('tables'):
+        #     os.makedirs('tables')
     except:
         print(f">>> Проблемы с исходным датафреймом (df_raw)[1]. Завершение работы.")
         sys.exit(3)
@@ -121,10 +140,11 @@ def main():
     except:
         print(f">>> Проблемы с исходным датафреймом (df_raw)[2]. Завершение работы.")
         sys.exit(4)
-    
-    
+
+
     ######################################################################################
     '''распределение исходных данных  на два отношения -- 'Компании' и 'Вакансии' (2NF)'''
+    ######################################################################################
     try:
         # отношение 'Компании'
         companies = df_raw[
@@ -148,7 +168,7 @@ def main():
             'vacancy.company.companycode': 'companycode',
             'vacancy.company.name': 'name',
             'vacancy.addresses.address': 'address',
-            'vacancy.company.hr-agency': 'hr-agency',
+            'vacancy.company.hr-agency': 'hr_agency',
             'vacancy.company.url': 'url',
             'vacancy.company.site': 'site',
             'vacancy.company.phone': 'phone',
@@ -156,7 +176,7 @@ def main():
             'vacancy.company.email': 'email',
             'vacancy.company.code_industry_branch': 'code_industry_branch',
         })
-        print("> Новое отношение 'Компании' успешно сформированно")
+        print(">> Новое отношение 'Компании' успешно сформированно")
     except:
         print(f">>> Проблема с формированием отношения 'Компании'. Завершение работы.")
         sys.exit(5)
@@ -188,7 +208,7 @@ def main():
             'vacancy.requirement.experience': 'experience',
             'vacancy.employment': 'employment',
             'vacancy.schedule': 'schedule',
-            'vacancy.job-name': 'job-name',
+            'vacancy.job-name': 'job_name',
             'vacancy.category.specialisation': 'specialisation',
             'vacancy.duty': 'duty',
             'vacancy.requirement.education': 'education',
@@ -201,17 +221,18 @@ def main():
             'vacancy.currency': 'currency',
             'vacancy.vac_url': 'vac_url',
             'vacancy.category.industry': 'industry',
-            'vacancy.creation-date': 'creation-date-from-api',
-            'vacancy.modify-date': 'modify-date-from-api',
+            'vacancy.creation-date': 'creation_date_from_api',
+            'vacancy.modify-date': 'modify_date_from_api',
         })
         vacancies['is_closed'] = False
-        print("> Новое отношение 'Вакансии' успешно сформированно.")
+        print(">> Новое отношение 'Вакансии' успешно сформированно.")
     except:
         print(f">>> Проблема с формированием отношения 'Вакансии'. Завершение работы.")
         sys.exit(6)
 
     ###############################################################
     '''получение таблиц с кодами и названиями ОКПДТР/МРИГО из БД'''
+    ###############################################################
     try:
         # используем сортировку по убыванию кодов для дальнейшего удобного сопастовления
         mrigo_query = """
@@ -231,18 +252,22 @@ def main():
                     FROM blinov.okpdtr_assoc;
                     """
         okpdtr_assoc_id_name = db.get_table_from_query(okptdr_assoc_query)
+        okpdtr_id_name = pd.concat([okpdtr_id_name, okpdtr_assoc_id_name], sort=False, ignore_index=True)
         print(f"> Таблица с кодами и наименованиям ОКПДТР успешно загружена.")
     except:
         print(f"> Нет доступа к БД в данный момент, либо проблемы с запросом. Заверешение работы.")
         sys.exit(7)
 
+
     ############################################################################
     '''сопоставление адресов вакансий с кодами МРИГО и имен вакансий с ОКПДТР'''
+    ############################################################################
     # константы
-    SIMILARITY_LEVEL_MRIGO = 70
-    SIMILARITY_LEVEL_OKPDTR = 80
+    SIMILARITY_LEVEL_MRIGO = 69
+    SIMILARITY_LEVEL_OKPDTR = 79
 
     print(f"\n> Сопоставление вакансий с кодами МРИГО:")
+    vacancies = vacancies[300:600]
     addresses = vacancies['address'].tolist()
     mrigo = mrigo_id_name['mrigo'].tolist()
     id_mrigo = mrigo_id_name['id_mrigo'].tolist()
@@ -250,7 +275,7 @@ def main():
 
     for i in range(len(addresses)):
         addresses[i] = addresses[i].replace('Новосибирская область, ', '', 1)
-        addresses[i] = re.sub(r"[\W\d]", '', addresses[i])
+        addresses[i] = re.sub(r"[\,\-\.\d]", '', addresses[i])
         if re.search(r'Новосибирский', addresses[i]) != None:
             addresses[i] = re.search(r'Новосибирский', addresses[i]).group(0)
         if re.search(r'рн\s\w+\s', addresses[i]) != None:
@@ -269,30 +294,29 @@ def main():
     # из полученного списка кортежей получаем датафрейм
     df_with_id_mrigo = pd.DataFrame(matched_list, columns=['id_mrigo', 'score'])
     # если полученная оценка меньше заданной, то выбранный МРИГО не рассматривается
-    df_with_id_mrigo['fix_id_mrigo'] = np.where(df_with_id_mrigo['score'] > SIMILARITY_LEVEL_MRIGO, df_with_id_mrigo['id_mrigo'], None)
+    df_with_id_mrigo['fix_id_mrigo'] = np.where(df_with_id_mrigo['score'] > SIMILARITY_LEVEL_MRIGO, df_with_id_mrigo['id_mrigo'], np.nan)
     # печать результатов (статистики) сопоставления
-    print(((df_with_id_mrigo.isnull() | df_with_id_mrigo.isna()).sum() * 100 / df_with_id_mrigo.index.size).round(2))
+    df_with_id_mrigo_ = df_with_id_mrigo['fix_id_mrigo']
+    print(((df_with_id_mrigo_.isnull() | df_with_id_mrigo_.isna()).sum() * 100 / df_with_id_mrigo_.index.size).round(2))
 
     # вставка кодов МРИГО в таблицу
     vacancies.insert(6, 'id_mrigo', df_with_id_mrigo['fix_id_mrigo'].tolist(), True)
 
-    vacancies = vacancies[:200]
-
     print(f"\n> Сопоставление вакансий с кодами ОКПДТР:")
-    jobs = vacancies['job-name'].tolist()[:200]
+    jobs = vacancies['job_name'].tolist()
     okpdtr = okpdtr_id_name['name'].tolist()
     id_okpdtr= okpdtr_id_name['id'].tolist()
     d2 = dict(zip(okpdtr, id_okpdtr))
-    
+
     # очистка наименований ОКПДТР
     for i in range(len(okpdtr)):
         okpdtr[i] = re.sub(r"[\W\d]", '', okpdtr[i].lower())
-    
+
     # очистка названий вакансий
     for i in range(len(jobs)):
         jobs[i] = re.sub(r"[\W\d]", '', re.split(r'{}'.format('|'.join(oks.dictionary)), jobs[i].lower())[0])
     print("Очистка имен вакансий и наименований ОКПДТР прошла успешно.")
-    
+
     # очистка списка с сопоставленными данными
     print(f">> Началось сопоставление вакансий с кодами ОКПТДР... (всего итераций -- {len(jobs)})")
     indexes = []
@@ -300,30 +324,28 @@ def main():
         sub_lst = []
         for _okpdtr in okpdtr:
             sub_lst.append(jellyfish.jaro_distance(_okpdtr, _job))
-        max_indexes = sf.find_locate_max(sub_lst)
+        max_indexes = find_locate_max(sub_lst)
         if max_indexes[0] < SIMILARITY_LEVEL_OKPDTR / 100.0:
             indexes.append(len(okpdtr))
         else:
             indexes.append(max_indexes[1][0])
-    id_okpdtr.append(None)
-    okpdtr.append(None)
+    id_okpdtr.append(np.nan)
+    okpdtr.append(np.nan)
     fix_id_okpdtr = [id_okpdtr[indexes[i]] for i in range(len(jobs))]
     print(f">> Сопоставление вакансий с кодами ОКПДТР завершено.")
-    
+
     fix_id_okpdtr_df = pd.DataFrame(fix_id_okpdtr, columns=['fix_id_okpdtr'])
     print(((fix_id_okpdtr_df.isnull() | fix_id_okpdtr_df.isna()).sum() * 100 / fix_id_okpdtr_df.index.size).round(2))
 
     # вставка кодов ОКПДТР в таблицу
     vacancies.insert(11, 'id_okpdtr', fix_id_okpdtr, True)
-    vacancies.to_csv(os.path.join('tables', 'vacancies_updated.csv'), index=None, header=True)
-    end = time.time()
+    # vacancies.to_csv(os.path.join('tables', 'vacancies_updated.csv'), index=None, header=True)
 
-    print(f"\n> Всего потребовалось времени: {end - start}")
-    
-    
+
     #################################################################################
     """выгрузка/обновление таблиц 'Компании' и дополненной таблицы 'Вакансии' в БД"""
-    print(f"\n> Выгрузка полученных полученных данных в БД.")
+    #################################################################################
+    print(f"\n> Выгрузка полученных данных в БД:")
     flag_companies = True
     # выгрузка компаний
     try:
@@ -331,19 +353,14 @@ def main():
                 SELECT *
                 FROM blinov.companies_tv
                 """
-        companies_tv_old = db.get_table_from_query(companies_query)
+        companies_old = db.get_table_from_query(companies_query)
     except:
         flag_companies = False
     # если уже есть отношение 'Компании' в БД
     if flag_companies:
         print(f">> Отношение 'Компании' уже содержится в БД. Добавление новых записей...")
-        
-        cond = companies['ogrn'].isin(companies_tv_old['ogrn'])
-        companies_tv_diff = companies.drop(companies[cond].index, inplace=False
-            ).reset_index().drop(
-                ['index'],
-                axis=1
-            )
+        cond = companies['ogrn'].isin(companies_old['ogrn'])
+        companies_tv_diff = companies.drop(companies[cond].index, inplace=False).reset_index().drop(['index'],axis=1)
 
         companies_tv_diff = companies_tv_diff.astype({
             'inn': 'str',
@@ -351,85 +368,81 @@ def main():
             'kpp': 'str',
         })
         for index, row in companies_tv_diff.iterrows():
-            companies_tv_diff.at[index, 'inn'] = re.split(
-                r'[.]',
-                companies_tv_diff.at[index, 'inn']
-                )[0]
-            companies_tv_diff.at[index, 'ogrn'] = re.split(
-                r'[.]',
-                companies_tv_diff.at[index, 'ogrn']
-                )[0]
-            companies_tv_diff.at[index, 'kpp'] = re.split(
-                r'[.]',
-                companies_tv_diff.at[index, 'kpp']
-                )[0]
+            companies_tv_diff.at[index, 'inn'] = re.split(r'[.]', companies_tv_diff.at[index, 'inn'])[0]
+            companies_tv_diff.at[index, 'ogrn'] = re.split(r'[.]', companies_tv_diff.at[index, 'ogrn'])[0]
+            companies_tv_diff.at[index, 'kpp'] = re.split(r'[.]', companies_tv_diff.at[index, 'kpp'])[0]
         companies_tv_diff = companies_tv_diff.replace({'nan': np.nan})
-        companies_tv_diff = companies_tv_diff.replace({np.nan: None})
         if not companies_tv_diff.empty:
-            print(f">> Число новых компаний для обновления -- {companies_tv_diff.shape[0]}")
-            companies_tv_diff.to_sql(
+            try:
+                print(f">> Число новых компаний для обновления -- {companies_tv_diff.shape[0]}")
+                companies_tv_diff.to_sql(
+                    'companies_tv',
+                    con=db.engine,
+                    schema='blinov',
+                    if_exists='append',
+                    index=False,
+                    chunksize=None,
+                    method='multi',
+                    dtype={
+                        'ogrn': sa.String,
+                        'inn': sa.String,
+                        'kpp': sa.String,
+                        'companycode': sa.String,
+                        'name': sa.String,
+                        'address': sa.String,
+                        'hr_agency': sa.String,
+                        'url': sa.String,
+                        'site': sa.String,
+                        'phone': sa.String,
+                        'fax': sa.String,
+                        'email': sa.String,
+                    })
+            except:
+                print(f">>> Проблема с обновлением отношения 'Компании'. Продолжение работы.")
+            else:
+                print(f">> Выгрузка новых данных в таблицу 'Компании' завершена.")
+        else:
+            print(f">> Нет новых компаний для выгрузки в БД.")
+    else:
+        try:
+            print(f">> Отношение 'Компании' ранее не содержалось в БД. Создание таблицы и добавление новых записей, если они есть...")
+            companies = companies.astype({
+                'inn' : 'str',
+                'ogrn' : 'str',
+                'kpp' : 'str',
+                })
+            for index, row in companies.iterrows():
+                companies.at[index, 'inn'] = re.split(r'[.]', companies.at[index, 'inn'])[0]
+                companies.at[index, 'ogrn'] = re.split(r'[.]', companies.at[index, 'ogrn'])[0]
+                companies.at[index, 'kpp'] = re.split(r'[.]', companies.at[index, 'kpp'])[0]
+            companies = companies.replace({'nan' : np.nan})
+            companies.to_sql(
                 'companies_tv',
                 con=db.engine,
                 schema='blinov',
-                if_exists='append',
+                if_exists='replace',
                 index=False,
                 chunksize=None,
                 method='multi',
                 dtype={
-                    'ogrn': sa.String,
-                    'inn': sa.String,
-                    'kpp': sa.String,
-                    'companycode': sa.String,
-                    'name': sa.String,
-                    'address': sa.String,
-                    'hr-agency': sa.String,
-                    'url': sa.String,
-                    'site': sa.String,
-                    'phone': sa.String,
-                    'fax': sa.String,
-                    'email': sa.String,
+                    'ogrn' : sa.String,
+                    'inn' : sa.String,
+                    'kpp' : sa.String,
+                    'companycode' : sa.String,
+                    'name' : sa.String,
+                    'address' : sa.String,
+                    'hr_agency' : sa.String,
+                    'url' : sa.String,
+                    'site' : sa.String,
+                    'phone' : sa.String,
+                    'fax' : sa.String,
+                    'email' : sa.String,
                 })
-            print(f">> Выгрузка новых данных в таблицу 'Компании' завершена.")
+            db.engine.execute('ALTER TABLE blinov.companies_tv ADD PRIMARY KEY(ogrn)') 
+        except:
+            print(f">>> Проблема с выгрузкой нового отношения 'Компании'. Продолжение работы.")
         else:
-            print(f">> Нет новых компаний для выгрузки в БД.")
-    else:
-        print(f">> Отношение 'Компании' ранее не содержалось в БД. Создание таблицы и добавление новых записей, если они есть...")
-        companies = companies.astype({
-            'inn' : 'str',
-            'ogrn' : 'str',
-            'kpp' : 'str',
-            })
-        for index, row in companies.iterrows():
-            companies.at[index, 'inn'] = re.split(r'[.]', companies.at[index, 'inn'])[0]
-            companies.at[index, 'ogrn'] = re.split(r'[.]', companies.at[index, 'ogrn'])[0]
-            companies.at[index, 'kpp'] = re.split(r'[.]', companies.at[index, 'kpp'])[0]
-        companies = companies.replace({'nan' : np.nan})
-        companies = companies.replace({np.nan : None})
-        companies.to_sql(
-            'companies_tv',
-            con=db.engine,
-            schema='blinov',
-            if_exists='replace',
-            index=False,
-            chunksize=None,
-            method='multi',
-            dtype={
-                'ogrn' : sa.String,
-                'inn' : sa.String,
-                'kpp' : sa.String,
-                'companycode' : sa.String,
-                'name' : sa.String,
-                'address' : sa.String,
-                'hr-agency' : sa.String,
-                'url' : sa.String,
-                'site' : sa.String,
-                'phone' : sa.String,
-                'fax' : sa.String,
-                'email' : sa.String,
-            })
-        db.engine.execute('ALTER TABLE blinov.companies_tv ADD PRIMARY KEY(ogrn)')
-        print(f">> Создание таблицы 'Компании' и выгрузка новых записей завершена.")
-
+            print(f">> Создание таблицы 'Компании' и выгрузка новых записей завершена.")
     # выгрузка вакансий
     flag_vacancies = True
     try:
@@ -437,7 +450,7 @@ def main():
                 SELECT *
                 FROM blinov.vacancies_tv
                 """
-        vacancies_tv_old = db.get_table_from_query(vacancies_query)
+        vacancies_old = db.get_table_from_query(vacancies_query)
     except:
         flag_vacancies = False
 
@@ -445,13 +458,16 @@ def main():
     if flag_vacancies:
         print(f">> Отношение 'Вакансии' уже содержится в БД. Добавление новых записей, если они есть...")
 
-        cond = vacancies['ogrn'].isin(vacancies_tv_old['ogrn'])
-        vacancies_tv_diff = vacancies.drop(vacancies[cond].index, inplace=False
-            ).reset_index().drop(
-                ['index'],
-                axis=1
-            )
+        cond = vacancies['id'].isin(vacancies_old['id'])
+        vacancies_tv_diff = vacancies.drop(vacancies[cond].index, inplace=False).reset_index().drop(['index'], axis=1)
 
+        # обновляем is_closed
+        id_from_old = set(vacancies_old.id) - set(vacancies.id)
+        if id_from_old:
+            print(f">> Всего закрытых вакансий -- {len(id_from_old)}")
+            db.engine.execute(sa.text("UPDATE blinov.vacancies_tv SET is_closed = TRUE WHERE id in :values").bindparams(values=tuple(id_from_old)))
+        else:
+            print(f">> Вакансий для закрытия не найдено.")
         vacancies_tv_diff = vacancies_tv_diff.astype({
             'region_code': 'str',
             'ogrn': 'str',
@@ -459,125 +475,122 @@ def main():
             'id_okpdtr': 'str',
         })
         for index, row in vacancies_tv_diff.iterrows():
-            vacancies_tv_diff.at[index, 'region_code'] = re.split(
-                r'[.]',
-                vacancies_tv_diff.at[index, 'region_code']
-                )[0]
-            vacancies_tv_diff.at[index, 'ogrn'] = re.split(
-                r'[.]',
-                vacancies_tv_diff.at[index, 'ogrn']
-                )[0]
-            vacancies_tv_diff.at[index, 'id_mrigo'] = re.split(
-                r'[.]',
-                vacancies_tv_diff.at[index, 'id_mrigo']
-                )[0]
-            vacancies_tv_diff.at[index, 'id_okpdtr'] = re.split(
-                r'[.]',
-                vacancies_tv_diff.at[index, 'id_okpdtr']
-                )[0]
+            vacancies_tv_diff.at[index, 'region_code'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'region_code'])[0]
+            vacancies_tv_diff.at[index, 'ogrn'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'ogrn'])[0]
+            vacancies_tv_diff.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'id_mrigo'])[0]
+            vacancies_tv_diff.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'id_okpdtr'])[0]
         vacancies_tv_diff = vacancies_tv_diff.replace({'nan': np.nan})
-        vacancies_tv_diff = vacancies_tv_diff.replace({np.nan: None})
         if not vacancies_tv_diff.empty:
-            print(f">> Число новых компаний для обновления -- {vacancies_tv_diff.shape[0]}")
-            vacancies_tv_diff.to_sql(
+            try:
+                print(f">> Число новых вакансий для обновления -- {vacancies_tv_diff.shape[0]}")
+                vacancies_tv_diff.to_sql(
+                    'vacancies_tv',
+                    con=db.engine,
+                    schema='blinov',
+                    if_exists='append',
+                    index=False,
+                    chunksize=None,
+                    method='multi',
+                    dtype={
+                        'id': sa.String,
+                        'ogrn': sa.String,
+                        'source': sa.String,
+                        'region_code': sa.String,
+                        'region_name': sa.String,
+                        'address': sa.String,
+                        'id_mrigo': sa.String,
+                        'experience': sa.String,
+                        'employment': sa.String,
+                        'schedule': sa.String,
+                        'job_name': sa.String,
+                        'id_okpdtr': sa.String,
+                        'specialisation': sa.String,
+                        'duty': sa.String,
+                        'education': sa.String,
+                        'qualification': sa.String,
+                        'term_text': sa.String,
+                        'social_protected': sa.String,
+                        'salary_min': sa.Float,
+                        'salary_max': sa.Float,
+                        'salary': sa.String,
+                        'currency': sa.String,
+                        'vac_url': sa.String,
+                        'creation_date_from_api' : sa.DateTime,
+                        'modify_date_from_api' : sa.DateTime,
+                        'download_time': sa.DateTime,
+                        'is_closed': sa.Boolean,
+                    })
+            except:
+                print(f">>> Проблема с обновлением отношения 'Вакансии'. Продолжение работы.")
+            else:
+                print(">> Выгрузка новых данных в таблицу 'Вакансии' завершена.")    
+        else:
+            print(">> Нет новых вакансий для выгрузки в БД.")
+    else:
+        try:
+            print(f">> Отношение 'Вакансии' ранее не содержалось в БД. Создание таблицы и добавление новых записей...")
+            vacancies = vacancies.astype({
+                'region_code' : 'str',
+                'ogrn' : 'str',
+                'id_mrigo' : 'str',
+                'id_okpdtr' : 'str',
+                })
+            for index, row in vacancies.iterrows():
+                vacancies.at[index, 'region_code'] = re.split(r'[.]', vacancies.at[index, 'region_code'])[0]
+                vacancies.at[index, 'ogrn'] = re.split(r'[.]', vacancies.at[index, 'ogrn'])[0]
+                vacancies.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies.at[index, 'id_mrigo'])[0]
+                vacancies.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies.at[index, 'id_okpdtr'])[0]
+            vacancies = vacancies.replace({'nan' : np.nan})
+            vacancies.to_sql(
                 'vacancies_tv',
                 con=db.engine,
                 schema='blinov',
-                if_exists='append',
+                if_exists='replace',
                 index=False,
                 chunksize=None,
                 method='multi',
                 dtype={
-                    'id': sa.String,
-                    'ogrn': sa.String,
-                    'source': sa.String,
-                    'region_code': sa.String,
-                    'region_name': sa.String,
-                    'address': sa.String,
-                    'id_mrigo': sa.String,
-                    'experience': sa.String,
-                    'employment': sa.String,
-                    'schedule': sa.String,
-                    'job-name': sa.String,
-                    'id_okpdtr': sa.String,
-                    'specialisation': sa.String,
-                    'duty': sa.String,
-                    'education': sa.String,
-                    'qualification': sa.String,
-                    'term_text': sa.String,
-                    'social_protected': sa.String,
-                    'salary_min': sa.Float,
-                    'salary_max': sa.Float,
-                    'salary': sa.String,
-                    'currency': sa.String,
-                    'vac_url': sa.String,
-                    'creation-date-from-api' : sa.DateTime,
-                    'modify-modify-date-from-api' : sa.DateTime,
+                    'id' : sa.String,
+                    'ogrn' : sa.String,
+                    'source' : sa.String,
+                    'region_code' : sa.String,
+                    'region_name' : sa.String,
+                    'address' : sa.String,
+                    'id_mrigo' : sa.String,
+                    'experience' : sa.String,
+                    'employment' : sa.String,
+                    'schedule' : sa.String,
+                    'job_name' : sa.String,
+                    'id_okpdtr' : sa.String,
+                    'specialisation' : sa.String,
+                    'duty' : sa.String,
+                    'education' : sa.String,
+                    'qualification' : sa.String,
+                    'term_text' : sa.String,
+                    'social_protected' : sa.String,
+                    'salary_min' : sa.Float,
+                    'salary_max' : sa.Float,
+                    'salary' : sa.String,
+                    'currency' : sa.String,
+                    'vac_url' : sa.String,
+                    'creation_date_from_api' : sa.DateTime,
+                    'modify_date_from_api' : sa.DateTime,
                     'download_time': sa.DateTime,
                     'is_closed': sa.Boolean,
                 })
-            print(">> Выгрузка новых данных в таблицу 'Вакансии' завершена.")
+            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD PRIMARY KEY(id)')
+            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_comp_f_key FOREIGN KEY (ogrn) REFERENCES blinov.companies_tv (ogrn)')
+            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_mrigo_f_key FOREIGN KEY (id_mrigo) REFERENCES blinov.mrigo (id_mrigo)')
+            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_okpdtr_f_key FOREIGN KEY (id_okpdtr) REFERENCES blinov.okpdtr (id)')
+        except:
+            print(f">>> Проблема с выгрузкой нового отношения 'Вакансии'. Продолжение работы.")
         else:
-            print(">> Нет новых вакансий для выгрузки в БД.")
-    else:
-        print(f">> Отношение 'Вакансии' ранее не содержалось в БД. Создание таблицы и добавление новых записей...")
-        vacancies = vacancies.astype({
-            'region_code' : 'str',
-            'ogrn' : 'str',
-            'id_mrigo' : 'str',
-            'id_okpdtr' : 'str',
-            })
-        for index, row in vacancies.iterrows():
-            vacancies.at[index, 'region_code'] = re.split(r'[.]', vacancies.at[index, 'region_code'])[0]
-            vacancies.at[index, 'ogrn'] = re.split(r'[.]', vacancies.at[index, 'ogrn'])[0]
-            vacancies.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies.at[index, 'id_mrigo'])[0]
-            vacancies.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies.at[index, 'id_okpdtr'])[0]
-        vacancies = vacancies.replace({'nan' : np.nan})
-        vacancies = vacancies.replace({np.nan : None})
-        vacancies.to_sql(
-            'vacancies_tv',
-            con=db.engine,
-            schema='blinov',
-            if_exists='replace',
-            index=False,
-            chunksize=None,
-            method='multi',
-            dtype={
-                'id' : sa.String,
-                'ogrn' : sa.String,
-                'source' : sa.String,
-                'region_code' : sa.String,
-                'region_name' : sa.String,
-                'address' : sa.String,
-                'id_mrigo' : sa.String,
-                'experience' : sa.String,
-                'employment' : sa.String,
-                'schedule' : sa.String,
-                'job-name' : sa.String,
-                'id_okpdtr' : sa.String,
-                'specialisation' : sa.String,
-                'duty' : sa.String,
-                'education' : sa.String,
-                'qualification' : sa.String,
-                'term_text' : sa.String,
-                'social_protected' : sa.String,
-                'salary_min' : sa.Float,
-                'salary_max' : sa.Float,
-                'salary' : sa.String,
-                'currency' : sa.String,
-                'vac_url' : sa.String,
-                'creation-date-from-api' : sa.DateTime,
-                'modify-modify-date-from-api' : sa.DateTime,
-                'download_time': sa.DateTime,
-                'is_closed': sa.Boolean,
-            })
-        db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD PRIMARY KEY(id)')
-        db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_comp_f_key FOREIGN KEY (ogrn) REFERENCES blinov.companies_tv (ogrn)')
-        db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_mrigo_f_key FOREIGN KEY (id_mrigo) REFERENCES blinov.mrigo (id_mrigo)')
-        db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_okpdtr_f_key FOREIGN KEY (id_okpdtr) REFERENCES blinov.okpdtr (id)')
-        print(f">> Создание таблицы 'Вакансии' и выгрузка новых записей завершена.")
+            print(f">> Создание таблицы 'Вакансии' и выгрузка новых записей завершена.")
     print(f">> Выгрузка данных в БД завершена.")
-    
+
+    end = time.time()
+    print(f"\n> Всего потребовалось времени: {end - start}")
+
 
 if __name__ == "__main__":
     main()
