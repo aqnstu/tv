@@ -128,8 +128,6 @@ def main():
                 df_raw.at[index, 'vacancy.requirement.qualification'])
         df_raw = df_raw.replace({False: np.nan})
         df_raw['download_time'] = pd.to_datetime('now')
-        # if not os.path.exists('tables'):
-        #     os.makedirs('tables')
     except:
         print(f">>> Проблемы с исходным датафреймом (df_raw)[1]. Завершение работы.")
         sys.exit(3)
@@ -137,6 +135,10 @@ def main():
     try:
         # выбираем ОГРН первичным ключом
         df_raw = df_raw[pd.notnull(df_raw['vacancy.company.ogrn'])]
+        df_raw = df_raw.drop_duplicates(
+            subset="vacancy.id",
+            keep='last'
+            )
     except:
         print(f">>> Проблемы с исходным датафреймом (df_raw)[2]. Завершение работы.")
         sys.exit(4)
@@ -295,9 +297,9 @@ def main():
     # если полученная оценка меньше заданной, то выбранный МРИГО не рассматривается
     df_with_id_mrigo['fix_id_mrigo'] = np.where(df_with_id_mrigo['score'] > SIMILARITY_LEVEL_MRIGO, df_with_id_mrigo['id_mrigo'], np.nan)
     # печать результатов (статистики) сопоставления
-    df_with_id_mrigo_ = df_with_id_mrigo['fix_id_mrigo']
+    df_with_id_mrigo_ = pd.DataFrame(df_with_id_mrigo['fix_id_mrigo'].tolist(), columns=['fix_id_mrigo'])
     print(((df_with_id_mrigo_.isnull() | df_with_id_mrigo_.isna()).sum() * 100 / df_with_id_mrigo_.index.size).round(2))
-
+    
     # вставка кодов МРИГО в таблицу
     vacancies.insert(6, 'id_mrigo', df_with_id_mrigo['fix_id_mrigo'].tolist(), True)
 
@@ -375,12 +377,12 @@ def main():
             try:
                 print(f">> Число новых компаний для обновления -- {companies_tv_diff.shape[0]}")
                 companies_tv_diff.to_sql(
-                    'companies_tv',
+                    'companies_tv_tmp',
                     con=db.engine,
                     schema='blinov',
-                    if_exists='append',
+                    if_exists='replace',
                     index=False,
-                    chunksize=None,
+                    chunksize=10000,
                     method='multi',
                     dtype={
                         'ogrn': sa.String,
@@ -396,6 +398,8 @@ def main():
                         'fax': sa.String,
                         'email': sa.String,
                     })
+                db.engine.execute('INSERT INTO blinov.companies_tv (ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email) SELECT ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email FROM blinov.companies_tv_tmp ON CONFLICT (ogrn) DO NOTHING;')
+                db.engine.execute('DROP TABLE blinov.companies_tv_tmp;')
             except:
                 print(f">>> Проблема с обновлением отношения 'Компании'. Продолжение работы.")
             else:
@@ -421,7 +425,7 @@ def main():
                 schema='blinov',
                 if_exists='replace',
                 index=False,
-                chunksize=None,
+                chunksize=10000,
                 method='multi',
                 dtype={
                     'ogrn' : sa.String,
@@ -483,42 +487,44 @@ def main():
             try:
                 print(f">> Число новых вакансий для обновления -- {vacancies_tv_diff.shape[0]}")
                 vacancies_tv_diff.to_sql(
-                    'vacancies_tv',
+                    'vacancies_tv_tmp',
                     con=db.engine,
                     schema='blinov',
-                    if_exists='append',
+                    if_exists='replace',
                     index=False,
-                    chunksize=None,
+                    chunksize=10000,
                     method='multi',
                     dtype={
-                        'id': sa.String,
-                        'ogrn': sa.String,
-                        'source': sa.String,
-                        'region_code': sa.String,
-                        'region_name': sa.String,
-                        'address': sa.String,
-                        'id_mrigo': sa.String,
-                        'experience': sa.String,
-                        'employment': sa.String,
-                        'schedule': sa.String,
-                        'job_name': sa.String,
-                        'id_okpdtr': sa.String,
-                        'specialisation': sa.String,
-                        'duty': sa.String,
-                        'education': sa.String,
-                        'qualification': sa.String,
-                        'term_text': sa.String,
-                        'social_protected': sa.String,
-                        'salary_min': sa.Float,
-                        'salary_max': sa.Float,
-                        'salary': sa.String,
-                        'currency': sa.String,
-                        'vac_url': sa.String,
+                        'id' : sa.String,
+                        'ogrn' : sa.String,
+                        'source' : sa.String,
+                        'region_code' : sa.String,
+                        'region_name' : sa.String,
+                        'address' : sa.String,
+                        'id_mrigo' : sa.String,
+                        'experience' : sa.String,
+                        'employment' : sa.String,
+                        'schedule' : sa.String,
+                        'job_name' : sa.String,
+                        'id_okpdtr' : sa.String,
+                        'specialisation' : sa.String,
+                        'duty' : sa.String,
+                        'education' : sa.String,
+                        'qualification' : sa.String,
+                        'term_text' : sa.String,
+                        'social_protected' : sa.String,
+                        'salary_min' : sa.Float,
+                        'salary_max' : sa.Float,
+                        'salary' : sa.String,
+                        'currency' : sa.String,
+                        'vac_url' : sa.String,
                         'creation_date_from_api' : sa.DateTime,
                         'modify_date_from_api' : sa.DateTime,
                         'download_time': sa.DateTime,
                         'is_closed': sa.Boolean,
                     })
+                db.engine.execute('INSERT INTO blinov.vacancies_tv (id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed) SELECT id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed FROM blinov.vacancies_tv_tmp ON CONFLICT (id) DO NOTHING;')
+                db.engine.execute('DROP TABLE blinov.vacancies_tv_tmp;')
             except:
                 print(f">>> Проблема с обновлением отношения 'Вакансии'. Продолжение работы.")
             else:
@@ -546,7 +552,7 @@ def main():
                 schema='blinov',
                 if_exists='replace',
                 index=False,
-                chunksize=None,
+                chunksize=10000,
                 method='multi',
                 dtype={
                     'id' : sa.String,
