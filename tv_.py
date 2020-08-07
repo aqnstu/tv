@@ -267,7 +267,6 @@ def main():
     SIMILARITY_LEVEL_OKPDTR = 79
 
     print(f"\n> Сопоставление вакансий с кодами МРИГО:")
-    vacancies = vacancies[300:600]
     addresses = vacancies['address'].tolist()
     mrigo = mrigo_id_name['mrigo'].tolist()
     id_mrigo = mrigo_id_name['id_mrigo'].tolist()
