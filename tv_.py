@@ -3,7 +3,7 @@
 """
     получение данных через API ТРУДВСЕМ,
     распределение исходных данных  на два отношения -- 'Компании' и 'Вакансии' (2NF),
-    получение таблиц с кодами и названиями ОКПДТР/МРИГО из БД,
+    получение из БД таблиц с кодами и названиями МРИГО/ОКПДТР, а также с параметрами для сопоставления,
     сопоставление адресов вакансий с кодами МРИГО и имен вакансий с ОКПДТР,
     выгрузка/обновление таблиц 'Компании' и дополненной таблицы 'Вакансии' в БД
 """
@@ -56,16 +56,12 @@ def get_page_from_api(offset):
     Входные параметры:
     offset -- сдвиг (текущая страница)
     """
-    try:
-        with urllib.request.urlopen("http://opendata.trudvsem.ru/api/v1/vacancies/region/54?offset=" + str(offset) + "&limit=100") as url:
-            data = json.loads(url.read().decode("utf-8"))
-            status = int(data['status'])
-            if status != 200:
-                return None, status
-            return data, status
-    except:
-        print(f">>> Проблема с получением данных со страниц (см. get_page_from_api()).")
-        return None, -1
+    with urllib.request.urlopen("http://opendata.trudvsem.ru/api/v1/vacancies/region/54?offset=" + str(offset) + "&limit=100") as url:
+        data = json.loads(url.read().decode("utf-8"))
+        status = int(data['status'])
+        if status != 200:
+            return None, status
+        return data, status
 
 
 def get_data_from_api(start_offset):
@@ -102,11 +98,15 @@ def main():
     try:
         df_raw = get_data_from_api(0)
     except:
-        print(f">>> Сервера TRUDVSEM недоступны, либо данные были перенесены. Завершение работы.")
+        s1 = "Сервера TRUDVSEM недоступны. Завершение работы."
+        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=1, msg=s1))
+        print(f">>> " + s1)
         sys.exit(1)
 
     if df_raw.empty:
-        print(f">>> Новых данных не найдено. Завершение работы.")
+        s2 = "Данных не найдено, возможно они были перенесены. Завершение работы."
+        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=2, msg=s2))
+        print(f">>> " + s2)
         sys.exit(2)
 
     try:
@@ -128,11 +128,7 @@ def main():
                 df_raw.at[index, 'vacancy.requirement.qualification'])
         df_raw = df_raw.replace({False: np.nan})
         df_raw['download_time'] = pd.to_datetime('now')
-    except:
-        print(f">>> Проблемы с исходным датафреймом (df_raw)[1]. Завершение работы.")
-        sys.exit(3)
-
-    try:
+        
         # выбираем ОГРН первичным ключом
         df_raw = df_raw[pd.notnull(df_raw['vacancy.company.ogrn'])]
         df_raw = df_raw.drop_duplicates(
@@ -140,8 +136,10 @@ def main():
             keep='last'
             )
     except:
-        print(f">>> Проблемы с исходным датафреймом (df_raw)[2]. Завершение работы.")
-        sys.exit(4)
+        s3 = "Проблемы с исходным датафреймом (df_raw). Завершение работы."
+        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=3, msg=s3))
+        print(f">>> " + s3)
+        sys.exit(3)
 
 
     ######################################################################################
@@ -180,8 +178,10 @@ def main():
         })
         print(">> Новое отношение 'Компании' успешно сформированно")
     except:
-        print(f">>> Проблема с формированием отношения 'Компании'. Завершение работы.")
-        sys.exit(5)
+        s4 = "Проблема с формированием отношения 'Компании'. Завершение работы."
+        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=4, msg=s4))
+        print(f">>> " + s4)
+        sys.exit(4)
 
     try:
         # отношение 'Вакансии'
@@ -229,44 +229,37 @@ def main():
         vacancies['is_closed'] = False
         print(">> Новое отношение 'Вакансии' успешно сформированно.")
     except:
-        print(f">>> Проблема с формированием отношения 'Вакансии'. Завершение работы.")
-        sys.exit(6)
+        s5 = "Проблема с формированием отношения 'Вакансии'. Завершение работы."
+        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=5, msg=s5))
+        print(f">>> " + s5)
+        sys.exit(5)
 
     ###############################################################
-    '''получение таблиц с кодами и названиями ОКПДТР/МРИГО из БД'''
+    '''получение из БД таблиц с кодами и названиями ОКПДТР/МРИГО, а также с параметрами для сопоставления'''
     ###############################################################
     try:
-        # используем сортировку по убыванию кодов для дальнейшего удобного сопастовления
-        mrigo_query = """
-        SELECT DISTINCT blinov.mrigo.id_mrigo, blinov.mrigo.mrigo
-        FROM blinov.mrigo
-        """
-        mrigo_id_name = db.get_table_from_query(mrigo_query)
-        print(f"\n> Таблица с кодами и наименованиям МРИГО успешно загружена.")
+        mrigo_id_name = db.get_table_from_db_by_table_name('blinov.mrigo')
+        print(f"\n> Таблица с кодами и наименованиям МРИГО успешно загруженаю")
 
-        okptdr_query = """
-                    SELECT blinov.okpdtr.id, blinov.okpdtr.name
-                    FROM blinov.okpdtr
-                    """
-        okpdtr_id_name = db.get_table_from_query(okptdr_query)
-        okptdr_assoc_query = """
-                    SELECT blinov.okpdtr_assoc.id, blinov.okpdtr_assoc.name
-                    FROM blinov.okpdtr_assoc;
-                    """
-        okpdtr_assoc_id_name = db.get_table_from_query(okptdr_assoc_query)
+        okpdtr_id_name = db.get_table_from_db_by_table_name('blinov.okpdtr')
+        okpdtr_assoc_id_name = db.get_table_from_db_by_table_name('blinov.okpdtr_assoc')
         okpdtr_id_name = pd.concat([okpdtr_id_name, okpdtr_assoc_id_name], sort=False, ignore_index=True)
         print(f"> Таблица с кодами и наименованиям ОКПДТР успешно загружена.")
+        
+        similarity_levels = db.get_table_from_db_by_table_name('blinov.tv_params')
     except:
-        print(f"> Нет доступа к БД в данный момент, либо проблемы с запросом. Заверешение работы.")
-        sys.exit(7)
+        s6 = "Нет доступа к БД в данный момент, либо проблемы с запросом. Заверешение работы."
+        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=6, msg=s6))
+        print(f">>> " + s6)
+        sys.exit(6)
 
 
     ############################################################################
     '''сопоставление адресов вакансий с кодами МРИГО и имен вакансий с ОКПДТР'''
     ############################################################################
     # константы
-    SIMILARITY_LEVEL_MRIGO = 69
-    SIMILARITY_LEVEL_OKPDTR = 79
+    SIMILARITY_LEVEL_MRIGO = similarity_levels['similarity_level_mrigo'].tolist()[-1]
+    SIMILARITY_LEVEL_OKPDTR = similarity_levels['similarity_level_okpdtr'].tolist()[-1]
 
     print(f"\n> Сопоставление вакансий с кодами МРИГО:")
     addresses = vacancies['address'].tolist()
@@ -347,6 +340,8 @@ def main():
     """выгрузка/обновление таблиц 'Компании' и дополненной таблицы 'Вакансии' в БД"""
     #################################################################################
     print(f"\n> Выгрузка полученных данных в БД:")
+    companies_counter = 0
+    vacancies_counter = 0
     flag_companies = True
     # выгрузка компаний
     try:
@@ -375,14 +370,14 @@ def main():
         companies_tv_diff = companies_tv_diff.replace({'nan': np.nan})
         if not companies_tv_diff.empty:
             try:
-                print(f">> Число новых компаний для обновления -- {companies_tv_diff.shape[0]}")
+                companies_counter = companies_tv_diff.shape[0]
+                print(f">> Число новых компаний для обновления -- {companies_counter}")
                 companies_tv_diff.to_sql(
                     'companies_tv_tmp',
                     con=db.engine,
                     schema='blinov',
                     if_exists='replace',
                     index=False,
-                    chunksize=10000,
                     method='multi',
                     dtype={
                         'ogrn': sa.String,
@@ -401,7 +396,9 @@ def main():
                 db.engine.execute('INSERT INTO blinov.companies_tv (ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email) SELECT ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email FROM blinov.companies_tv_tmp ON CONFLICT (ogrn) DO NOTHING;')
                 db.engine.execute('DROP TABLE blinov.companies_tv_tmp;')
             except:
-                print(f">>> Проблема с обновлением отношения 'Компании'. Продолжение работы.")
+                s7 = "Проблема с обновлением отношения 'Компании'. Продолжение работы."
+                db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s7))
+                print(f">>> " + s7)
             else:
                 print(f">> Выгрузка новых данных в таблицу 'Компании' завершена.")
         else:
@@ -419,13 +416,14 @@ def main():
                 companies.at[index, 'ogrn'] = re.split(r'[.]', companies.at[index, 'ogrn'])[0]
                 companies.at[index, 'kpp'] = re.split(r'[.]', companies.at[index, 'kpp'])[0]
             companies = companies.replace({'nan' : np.nan})
+            companies_counter = companies.shape[0]
+            print(f">> Число новых компаний для загрузки -- {companies_counter}")
             companies.to_sql(
                 'companies_tv',
                 con=db.engine,
                 schema='blinov',
                 if_exists='replace',
                 index=False,
-                chunksize=10000,
                 method='multi',
                 dtype={
                     'ogrn' : sa.String,
@@ -443,7 +441,9 @@ def main():
                 })
             db.engine.execute('ALTER TABLE blinov.companies_tv ADD PRIMARY KEY(ogrn)') 
         except:
-            print(f">>> Проблема с выгрузкой нового отношения 'Компании'. Продолжение работы.")
+            s8 = f"Проблема с выгрузкой нового отношения 'Компании'. Продолжение работы."
+            db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s8))
+            print(f">>> " + s8)
         else:
             print(f">> Создание таблицы 'Компании' и выгрузка новых записей завершена.")
     # выгрузка вакансий
@@ -485,14 +485,14 @@ def main():
         vacancies_tv_diff = vacancies_tv_diff.replace({'nan': np.nan})
         if not vacancies_tv_diff.empty:
             try:
-                print(f">> Число новых вакансий для обновления -- {vacancies_tv_diff.shape[0]}")
+                vacancies_counter = vacancies_tv_diff.shape[0]
+                print(f">> Число новых вакансий для обновления -- {vacancies_counter}")
                 vacancies_tv_diff.to_sql(
                     'vacancies_tv_tmp',
                     con=db.engine,
                     schema='blinov',
                     if_exists='replace',
                     index=False,
-                    chunksize=10000,
                     method='multi',
                     dtype={
                         'id' : sa.String,
@@ -526,7 +526,9 @@ def main():
                 db.engine.execute('INSERT INTO blinov.vacancies_tv (id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed) SELECT id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed FROM blinov.vacancies_tv_tmp ON CONFLICT (id) DO NOTHING;')
                 db.engine.execute('DROP TABLE blinov.vacancies_tv_tmp;')
             except:
-                print(f">>> Проблема с обновлением отношения 'Вакансии'. Продолжение работы.")
+                s9 = "Проблема с обновлением отношения 'Вакансии'. Продолжение работы."
+                db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s9))
+                print(f">>> " + s9)
             else:
                 print(">> Выгрузка новых данных в таблицу 'Вакансии' завершена.")    
         else:
@@ -546,13 +548,14 @@ def main():
                 vacancies.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies.at[index, 'id_mrigo'])[0]
                 vacancies.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies.at[index, 'id_okpdtr'])[0]
             vacancies = vacancies.replace({'nan' : np.nan})
+            vacancies_counter = vacancies.shape[0]
+            print(f">> Число новых вакансий для загрузки -- {vacancies_counter}")
             vacancies.to_sql(
                 'vacancies_tv',
                 con=db.engine,
                 schema='blinov',
                 if_exists='replace',
                 index=False,
-                chunksize=10000,
                 method='multi',
                 dtype={
                     'id' : sa.String,
@@ -588,15 +591,21 @@ def main():
             db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_mrigo_f_key FOREIGN KEY (id_mrigo) REFERENCES blinov.mrigo (id_mrigo)')
             db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_okpdtr_f_key FOREIGN KEY (id_okpdtr) REFERENCES blinov.okpdtr (id)')
         except:
-            print(f">>> Проблема с выгрузкой нового отношения 'Вакансии'. Продолжение работы.")
+            s10 = f"Проблема с выгрузкой нового отношения 'Вакансии'. Продолжение работы."
+            db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s10))
+            print(f">>> " + s10)
         else:
             print(f">> Создание таблицы 'Вакансии' и выгрузка новых записей завершена.")
     print(f">> Выгрузка данных в БД завершена.")
-
+    
     end = time.time()
     print(f"\n> Всего потребовалось времени: {end - start}")
+    
+    return companies_counter, vacancies_counter
 
 
 if __name__ == "__main__":
-    main()
-    print(f"\n> Программа успешно завершила свою работу.")
+    companies_counter, vacancies_counter = main()
+    s0 = "Программа успешно завершила свою работу."
+    db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message, num_of_companies, num_of_vacancies) VALUES (:ep, :msg, :noc, :nov)").bindparams(ep=0, msg=s0, noc=companies_counter, nov=vacancies_counter))
+    print(f"\n> " + s0)
