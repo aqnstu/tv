@@ -143,7 +143,7 @@ def main():
 
 
     ######################################################################################
-    '''распределение исходных данных  на два отношения -- 'Компании' и 'Вакансии' (2NF)'''
+    '''распределение исходных данных на два отношения -- 'Компании' и 'Вакансии' (2NF)'''
     ######################################################################################
     try:
         # отношение 'Компании'
@@ -235,11 +235,11 @@ def main():
         sys.exit(5)
 
     ###############################################################
-    '''получение из БД таблиц с кодами и названиями ОКПДТР/МРИГО, а также с параметрами для сопоставления'''
+    '''получение из БД таблиц с кодами и названиями МРИГО/ОКПДТР, а также с параметрами для сопоставления'''
     ###############################################################
     try:
         mrigo_id_name = db.get_table_from_db_by_table_name('blinov.mrigo')
-        print(f"\n> Таблица с кодами и наименованиям МРИГО успешно загруженаю")
+        print(f"\n> Таблица с кодами и наименованиям МРИГО успешно загружена.")
 
         okpdtr_id_name = db.get_table_from_db_by_table_name('blinov.okpdtr')
         okpdtr_assoc_id_name = db.get_table_from_db_by_table_name('blinov.okpdtr_assoc')
@@ -247,6 +247,7 @@ def main():
         print(f"> Таблица с кодами и наименованиям ОКПДТР успешно загружена.")
         
         similarity_levels = db.get_table_from_db_by_table_name('blinov.tv_params')
+        print(f"> Таблица с параметрами для сопоставления успешно загружена.")
     except:
         s6 = "Нет доступа к БД в данный момент, либо проблемы с запросом. Заверешение работы."
         db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=6, msg=s6))
@@ -283,7 +284,6 @@ def main():
     for _address in addresses:
         a = process.extractOne(_address, mrigo, scorer=fuzz.token_set_ratio)
         matched_list.append((d1[a[0]], a[1]))
-    print(f">> Сопоставление вакансий с кодами МРИГО завершено.")
 
     # из полученного списка кортежей получаем датафрейм
     df_with_id_mrigo = pd.DataFrame(matched_list, columns=['id_mrigo', 'score'])
@@ -295,6 +295,7 @@ def main():
     
     # вставка кодов МРИГО в таблицу
     vacancies.insert(6, 'id_mrigo', df_with_id_mrigo['fix_id_mrigo'].tolist(), True)
+    print(f">> Сопоставление вакансий с кодами МРИГО завершено.")
 
     print(f"\n> Сопоставление вакансий с кодами ОКПДТР:")
     jobs = vacancies['job_name'].tolist()
@@ -309,7 +310,7 @@ def main():
     # очистка названий вакансий
     for i in range(len(jobs)):
         jobs[i] = re.sub(r"[\W\d]", '', re.split(r'{}'.format('|'.join(oks.dictionary)), jobs[i].lower())[0])
-    print("Очистка имен вакансий и наименований ОКПДТР прошла успешно.")
+    print(f">> Очистка имен вакансий и наименований ОКПДТР прошла успешно.")
 
     # очистка списка с сопоставленными данными
     print(f">> Началось сопоставление вакансий с кодами ОКПТДР... (всего итераций -- {len(jobs)})")
@@ -326,14 +327,14 @@ def main():
     id_okpdtr.append(np.nan)
     okpdtr.append(np.nan)
     fix_id_okpdtr = [id_okpdtr[indexes[i]] for i in range(len(jobs))]
-    print(f">> Сопоставление вакансий с кодами ОКПДТР завершено.")
-
+    
     fix_id_okpdtr_df = pd.DataFrame(fix_id_okpdtr, columns=['fix_id_okpdtr'])
     print(((fix_id_okpdtr_df.isnull() | fix_id_okpdtr_df.isna()).sum() * 100 / fix_id_okpdtr_df.index.size).round(2))
 
     # вставка кодов ОКПДТР в таблицу
     vacancies.insert(11, 'id_okpdtr', fix_id_okpdtr, True)
     # vacancies.to_csv(os.path.join('tables', 'vacancies_updated.csv'), index=None, header=True)
+    print(f">> Сопоставление вакансий с кодами ОКПДТР завершено.")
 
 
     #################################################################################
