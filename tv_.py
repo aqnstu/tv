@@ -4,7 +4,7 @@
     получение данных через API ТРУДВСЕМ,
     распределение исходных данных  на два отношения -- 'Компании' и 'Вакансии' (2NF),
     получение из БД таблиц с кодами и названиями МРИГО/ОКПДТР, а также с параметрами для сопоставления,
-    сопоставление адресов вакансий с кодами МРИГО и имен вакансий с ОКПДТР,
+    сопоставление адресов вакансий с кодами МРИГО и имен вакансий с кодами ОКПДТР,
     выгрузка/обновление таблиц 'Компании' и дополненной таблицы 'Вакансии' в БД
 """
 
@@ -21,8 +21,8 @@ import sys
 import time
 import urllib.request
 
-from fuzzywuzzy import fuzz
-from fuzzywuzzy import process
+from rapidfuzz import fuzz
+from rapidfuzz import process
 
 import misc.db as db
 import misc.okpdtr_splits as oks
@@ -234,9 +234,9 @@ def main():
         print(f">>> " + s5)
         sys.exit(5)
 
-    ###############################################################
+    ########################################################################################################
     '''получение из БД таблиц с кодами и названиями МРИГО/ОКПДТР, а также с параметрами для сопоставления'''
-    ###############################################################
+    ########################################################################################################
     try:
         mrigo_id_name = db.get_table_from_db_by_table_name('blinov.mrigo')
         print(f"\n> Таблица с кодами и наименованиям МРИГО успешно загружена.")
@@ -255,14 +255,15 @@ def main():
         sys.exit(6)
 
 
-    ############################################################################
-    '''сопоставление адресов вакансий с кодами МРИГО и имен вакансий с ОКПДТР'''
-    ############################################################################
+    ###################################################################################
+    '''сопоставление адресов вакансий с кодами МРИГО и имен вакансий с кодами ОКПДТР'''
+    ###################################################################################
     # константы
     SIMILARITY_LEVEL_MRIGO = similarity_levels['similarity_level_mrigo'].tolist()[-1]
     SIMILARITY_LEVEL_OKPDTR = similarity_levels['similarity_level_okpdtr'].tolist()[-1]
 
     print(f"\n> Сопоставление вакансий с кодами МРИГО:")
+    vacancies = vacancies[4000:5000]
     addresses = vacancies['address'].tolist()
     mrigo = mrigo_id_name['mrigo'].tolist()
     id_mrigo = mrigo_id_name['id_mrigo'].tolist()
@@ -346,34 +347,30 @@ def main():
     flag_companies = True
     # выгрузка компаний
     try:
-        companies_query = """
-                SELECT *
-                FROM blinov.companies_tv
-                """
-        companies_old = db.get_table_from_query(companies_query)
+        companies_old = db.get_table_from_db_by_table_name('blinov.companies_tv')
     except:
         flag_companies = False
     # если уже есть отношение 'Компании' в БД
     if flag_companies:
         print(f">> Отношение 'Компании' уже содержится в БД. Добавление новых записей...")
         cond = companies['ogrn'].isin(companies_old['ogrn'])
-        companies_tv_diff = companies.drop(companies[cond].index, inplace=False).reset_index().drop(['index'],axis=1)
+        companies_diff = companies.drop(companies[cond].index, inplace=False).reset_index().drop(['index'],axis=1)
 
-        companies_tv_diff = companies_tv_diff.astype({
+        companies_diff = companies_diff.astype({
             'inn': 'str',
             'ogrn': 'str',
             'kpp': 'str',
         })
-        for index, row in companies_tv_diff.iterrows():
-            companies_tv_diff.at[index, 'inn'] = re.split(r'[.]', companies_tv_diff.at[index, 'inn'])[0]
-            companies_tv_diff.at[index, 'ogrn'] = re.split(r'[.]', companies_tv_diff.at[index, 'ogrn'])[0]
-            companies_tv_diff.at[index, 'kpp'] = re.split(r'[.]', companies_tv_diff.at[index, 'kpp'])[0]
-        companies_tv_diff = companies_tv_diff.replace({'nan': np.nan})
-        if not companies_tv_diff.empty:
+        for index, row in companies_diff.iterrows():
+            companies_diff.at[index, 'inn'] = re.split(r'[.]', companies_diff.at[index, 'inn'])[0]
+            companies_diff.at[index, 'ogrn'] = re.split(r'[.]', companies_diff.at[index, 'ogrn'])[0]
+            companies_diff.at[index, 'kpp'] = re.split(r'[.]', companies_diff.at[index, 'kpp'])[0]
+        companies_diff = companies_diff.replace({'nan': np.nan})
+        if not companies_diff.empty:
             try:
-                companies_counter = companies_tv_diff.shape[0]
+                companies_counter = companies_diff.shape[0]
                 print(f">> Число новых компаний для обновления -- {companies_counter}")
-                companies_tv_diff.to_sql(
+                companies_diff.to_sql(
                     'companies_tv_tmp',
                     con=db.engine,
                     schema='blinov',
@@ -399,6 +396,7 @@ def main():
             except:
                 s7 = "Проблема с обновлением отношения 'Компании'. Продолжение работы."
                 db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s7))
+                companies_counter = 0
                 print(f">>> " + s7)
             else:
                 print(f">> Выгрузка новых данных в таблицу 'Компании' завершена.")
@@ -444,26 +442,23 @@ def main():
         except:
             s8 = f"Проблема с выгрузкой нового отношения 'Компании'. Продолжение работы."
             db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s8))
+            companies_counter = 0
             print(f">>> " + s8)
         else:
             print(f">> Создание таблицы 'Компании' и выгрузка новых записей завершена.")
+    
     # выгрузка вакансий
     flag_vacancies = True
     try:
-        vacancies_query = """
-                SELECT *
-                FROM blinov.vacancies_tv
-                """
-        vacancies_old = db.get_table_from_query(vacancies_query)
+        vacancies_old = db.get_table_from_db_by_table_name('blinov.vacancies_tv')
     except:
         flag_vacancies = False
 
     # если уже есть отношение 'Вакансии' в БД
     if flag_vacancies:
         print(f">> Отношение 'Вакансии' уже содержится в БД. Добавление новых записей, если они есть...")
-
         cond = vacancies['id'].isin(vacancies_old['id'])
-        vacancies_tv_diff = vacancies.drop(vacancies[cond].index, inplace=False).reset_index().drop(['index'], axis=1)
+        vacancies_diff = vacancies.drop(vacancies[cond].index, inplace=False).reset_index().drop(['index'], axis=1)
 
         # обновляем is_closed
         id_from_old = set(vacancies_old.id) - set(vacancies.id)
@@ -472,23 +467,23 @@ def main():
             db.engine.execute(sa.text("UPDATE blinov.vacancies_tv SET is_closed = TRUE WHERE id in :values").bindparams(values=tuple(id_from_old)))
         else:
             print(f">> Вакансий для закрытия не найдено.")
-        vacancies_tv_diff = vacancies_tv_diff.astype({
+        vacancies_diff = vacancies_diff.astype({
             'region_code': 'str',
             'ogrn': 'str',
             'id_mrigo': 'str',
             'id_okpdtr': 'str',
         })
-        for index, row in vacancies_tv_diff.iterrows():
-            vacancies_tv_diff.at[index, 'region_code'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'region_code'])[0]
-            vacancies_tv_diff.at[index, 'ogrn'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'ogrn'])[0]
-            vacancies_tv_diff.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'id_mrigo'])[0]
-            vacancies_tv_diff.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies_tv_diff.at[index, 'id_okpdtr'])[0]
-        vacancies_tv_diff = vacancies_tv_diff.replace({'nan': np.nan})
-        if not vacancies_tv_diff.empty:
+        for index, row in vacancies_diff.iterrows():
+            vacancies_diff.at[index, 'region_code'] = re.split(r'[.]', vacancies_diff.at[index, 'region_code'])[0]
+            vacancies_diff.at[index, 'ogrn'] = re.split(r'[.]', vacancies_diff.at[index, 'ogrn'])[0]
+            vacancies_diff.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies_diff.at[index, 'id_mrigo'])[0]
+            vacancies_diff.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies_diff.at[index, 'id_okpdtr'])[0]
+        vacancies_diff = vacancies_diff.replace({'nan': np.nan})
+        if not vacancies_diff.empty:
             try:
-                vacancies_counter = vacancies_tv_diff.shape[0]
+                vacancies_counter = vacancies_diff.shape[0]
                 print(f">> Число новых вакансий для обновления -- {vacancies_counter}")
-                vacancies_tv_diff.to_sql(
+                vacancies_diff.to_sql(
                     'vacancies_tv_tmp',
                     con=db.engine,
                     schema='blinov',
@@ -529,6 +524,7 @@ def main():
             except:
                 s9 = "Проблема с обновлением отношения 'Вакансии'. Продолжение работы."
                 db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s9))
+                vacancies_counter = 0
                 print(f">>> " + s9)
             else:
                 print(">> Выгрузка новых данных в таблицу 'Вакансии' завершена.")    
@@ -594,6 +590,7 @@ def main():
         except:
             s10 = f"Проблема с выгрузкой нового отношения 'Вакансии'. Продолжение работы."
             db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s10))
+            vacancies_counter = 0
             print(f">>> " + s10)
         else:
             print(f">> Создание таблицы 'Вакансии' и выгрузка новых записей завершена.")
