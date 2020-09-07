@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf8 -*-
 """
-    получение данных через API ТРУДВСЕМ,
-    распределение исходных данных  на два отношения -- 'Компании' и 'Вакансии' (2NF),
-    получение из БД таблиц с кодами и названиями МРИГО/ОКПДТР, а также с параметрами для сопоставления,
-    сопоставление адресов вакансий с кодами МРИГО и имен вакансий с кодами ОКПДТР,
-    выгрузка/обновление таблиц 'Компании' и дополненной таблицы 'Вакансии' в БД
+  - Получение данных через API ТРУДВСЕМ.
+  - Распределение исходных данных на два отношения -- "Компании" и "Вакансии" (2NF).
+  - Получение из БД таблиц с кодами и названиями МРИГО/ОКПДТР, а также с параметрами для сопоставления.
+  - Cопоставление адресов вакансий с кодами МРИГО и имен вакансий с кодами ОКПДТР.
+  - Выгрузка/обновление таблиц 'Компании' и дополненной таблицы "Вакансии" в БД.
+  - Логирование скрипта. 
+  - Измерение времени выполнения.
 """
 
 import html
@@ -81,7 +83,7 @@ def get_data_from_api(start_offset):
             break
         new_data = data['results']['vacancies']
         # приводим полученные данные к таблице
-        df_tmp = pd.io.json.json_normalize(new_data)
+        df_tmp = pd.json_normalize(new_data)
         df_raw = pd.concat([df_raw, df_tmp], sort=False, ignore_index=True)
         offset += 1
     print(">> Загрузка данных через API TRUDVSEM заверешна.")
@@ -99,13 +101,13 @@ def main():
         df_raw = get_data_from_api(0)
     except:
         s1 = "Сервера TRUDVSEM недоступны. Завершение работы."
-        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=1, msg=s1))
+        db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=1, msg=s1))
         print(f">>> " + s1)
         sys.exit(1)
 
     if df_raw.empty:
         s2 = "Данных не найдено, возможно они были перенесены. Завершение работы."
-        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=2, msg=s2))
+        db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=2, msg=s2))
         print(f">>> " + s2)
         sys.exit(2)
 
@@ -127,6 +129,7 @@ def main():
             df_raw.at[index, 'vacancy.requirement.qualification'] = remove_tags(
                 df_raw.at[index, 'vacancy.requirement.qualification'])
         df_raw = df_raw.replace({False: np.nan})
+        # время загрузки данных (фактическое)
         df_raw['download_time'] = pd.to_datetime('now')
         
         # выбираем ОГРН первичным ключом
@@ -137,7 +140,7 @@ def main():
             )
     except:
         s3 = "Проблемы с исходным датафреймом (df_raw). Завершение работы."
-        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=3, msg=s3))
+        db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=3, msg=s3))
         print(f">>> " + s3)
         sys.exit(3)
 
@@ -179,7 +182,7 @@ def main():
         print(">> Новое отношение 'Компании' успешно сформированно")
     except:
         s4 = "Проблема с формированием отношения 'Компании'. Завершение работы."
-        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=4, msg=s4))
+        db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=4, msg=s4))
         print(f">>> " + s4)
         sys.exit(4)
 
@@ -227,10 +230,11 @@ def main():
             'vacancy.modify-date': 'modify_date_from_api',
         })
         vacancies['is_closed'] = False
+        vacancies['closing_time'] = np.nan
         print(">> Новое отношение 'Вакансии' успешно сформированно.")
     except:
         s5 = "Проблема с формированием отношения 'Вакансии'. Завершение работы."
-        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=5, msg=s5))
+        db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=5, msg=s5))
         print(f">>> " + s5)
         sys.exit(5)
 
@@ -246,11 +250,11 @@ def main():
         okpdtr_id_name = pd.concat([okpdtr_id_name, okpdtr_assoc_id_name], sort=False, ignore_index=True)
         print(f"> Таблица с кодами и наименованиям ОКПДТР успешно загружена.")
         
-        similarity_levels = db.get_table_from_db_by_table_name('blinov.tv_params')
+        similarity_levels = db.get_table_from_db_by_table_name('vacs.tv_params')
         print(f"> Таблица с параметрами для сопоставления успешно загружена.")
     except:
         s6 = "Нет доступа к БД в данный момент, либо проблемы с запросом. Заверешение работы."
-        db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=6, msg=s6))
+        db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=6, msg=s6))
         print(f">>> " + s6)
         sys.exit(6)
 
@@ -263,7 +267,6 @@ def main():
     SIMILARITY_LEVEL_OKPDTR = similarity_levels['similarity_level_okpdtr'].tolist()[-1]
 
     print(f"\n> Сопоставление вакансий с кодами МРИГО:")
-    vacancies = vacancies[4000:5000]
     addresses = vacancies['address'].tolist()
     mrigo = mrigo_id_name['mrigo'].tolist()
     id_mrigo = mrigo_id_name['id_mrigo'].tolist()
@@ -347,7 +350,7 @@ def main():
     flag_companies = True
     # выгрузка компаний
     try:
-        companies_old = db.get_table_from_db_by_table_name('blinov.companies_tv')
+        companies_old = db.get_table_from_db_by_table_name('vacs.companies_tv')
     except:
         flag_companies = False
     # если уже есть отношение 'Компании' в БД
@@ -373,7 +376,7 @@ def main():
                 companies_diff.to_sql(
                     'companies_tv_tmp',
                     con=db.engine,
-                    schema='blinov',
+                    schema='vacs',
                     if_exists='replace',
                     index=False,
                     method='multi',
@@ -391,11 +394,11 @@ def main():
                         'fax': sa.String,
                         'email': sa.String,
                     })
-                db.engine.execute('INSERT INTO blinov.companies_tv (ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email) SELECT ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email FROM blinov.companies_tv_tmp ON CONFLICT (ogrn) DO NOTHING;')
-                db.engine.execute('DROP TABLE blinov.companies_tv_tmp;')
+                db.engine.execute('INSERT INTO vacs.companies_tv (ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email) SELECT ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email FROM vacs.companies_tv_tmp ON CONFLICT (ogrn) DO NOTHING;')
+                db.engine.execute('DROP TABLE vacs.companies_tv_tmp;')
             except:
                 s7 = "Проблема с обновлением отношения 'Компании'. Продолжение работы."
-                db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s7))
+                db.engine.execute(sa.text("INSERT INTO vacs.tv_log (message) VALUES (:msg)").bindparams(msg=s7))
                 companies_counter = 0
                 print(f">>> " + s7)
             else:
@@ -420,7 +423,7 @@ def main():
             companies.to_sql(
                 'companies_tv',
                 con=db.engine,
-                schema='blinov',
+                schema='vacs',
                 if_exists='replace',
                 index=False,
                 method='multi',
@@ -438,10 +441,10 @@ def main():
                     'fax' : sa.String,
                     'email' : sa.String,
                 })
-            db.engine.execute('ALTER TABLE blinov.companies_tv ADD PRIMARY KEY(ogrn)') 
+            db.engine.execute('ALTER TABLE vacs.companies_tv ADD PRIMARY KEY(ogrn)') 
         except:
             s8 = f"Проблема с выгрузкой нового отношения 'Компании'. Продолжение работы."
-            db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s8))
+            db.engine.execute(sa.text("INSERT INTO vacs.tv_log (message) VALUES (:msg)").bindparams(msg=s8))
             companies_counter = 0
             print(f">>> " + s8)
         else:
@@ -450,7 +453,7 @@ def main():
     # выгрузка вакансий
     flag_vacancies = True
     try:
-        vacancies_old = db.get_table_from_db_by_table_name('blinov.vacancies_tv')
+        vacancies_old = db.get_table_from_db_by_table_name('vacs.vacancies_tv')
     except:
         flag_vacancies = False
 
@@ -460,11 +463,12 @@ def main():
         cond = vacancies['id'].isin(vacancies_old['id'])
         vacancies_diff = vacancies.drop(vacancies[cond].index, inplace=False).reset_index().drop(['index'], axis=1)
 
-        # обновляем is_closed
+        # обновляем is_closed и closing_time
         id_from_old = set(vacancies_old.id) - set(vacancies.id)
         if id_from_old:
             print(f">> Всего закрытых вакансий -- {len(id_from_old)}")
-            db.engine.execute(sa.text("UPDATE blinov.vacancies_tv SET is_closed = TRUE WHERE id in :values").bindparams(values=tuple(id_from_old)))
+            db.engine.execute(sa.text("UPDATE vacs.vacancies_tv SET is_closed = TRUE WHERE is_closed = FALSE AND id in :values").bindparams(values=tuple(id_from_old)))
+            db.engine.execute(sa.text("UPDATE vacs.vacancies_tv SET closing_time = now() WHERE closing_time IS NULL AND id in :values").bindparams(values=tuple(id_from_old)))
         else:
             print(f">> Вакансий для закрытия не найдено.")
         vacancies_diff = vacancies_diff.astype({
@@ -486,7 +490,7 @@ def main():
                 vacancies_diff.to_sql(
                     'vacancies_tv_tmp',
                     con=db.engine,
-                    schema='blinov',
+                    schema='vacs',
                     if_exists='replace',
                     index=False,
                     method='multi',
@@ -518,12 +522,13 @@ def main():
                         'modify_date_from_api' : sa.DateTime,
                         'download_time': sa.DateTime,
                         'is_closed': sa.Boolean,
+                        'closing_time': sa.DateTime,
                     })
-                db.engine.execute('INSERT INTO blinov.vacancies_tv (id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed) SELECT id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed FROM blinov.vacancies_tv_tmp ON CONFLICT (id) DO NOTHING;')
-                db.engine.execute('DROP TABLE blinov.vacancies_tv_tmp;')
+                db.engine.execute('INSERT INTO vacs.vacancies_tv (id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed, closing_time) SELECT id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed, closing_time FROM vacs.vacancies_tv_tmp ON CONFLICT (id) DO NOTHING;')
+                db.engine.execute('DROP TABLE vacs.vacancies_tv_tmp;')
             except:
                 s9 = "Проблема с обновлением отношения 'Вакансии'. Продолжение работы."
-                db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s9))
+                db.engine.execute(sa.text("INSERT INTO vacs.tv_log (message) VALUES (:msg)").bindparams(msg=s9))
                 vacancies_counter = 0
                 print(f">>> " + s9)
             else:
@@ -550,7 +555,7 @@ def main():
             vacancies.to_sql(
                 'vacancies_tv',
                 con=db.engine,
-                schema='blinov',
+                schema='vacs',
                 if_exists='replace',
                 index=False,
                 method='multi',
@@ -582,14 +587,15 @@ def main():
                     'modify_date_from_api' : sa.DateTime,
                     'download_time': sa.DateTime,
                     'is_closed': sa.Boolean,
+                    'closing_time': sa.DateTime,
                 })
-            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD PRIMARY KEY(id)')
-            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_comp_f_key FOREIGN KEY (ogrn) REFERENCES blinov.companies_tv (ogrn)')
-            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_mrigo_f_key FOREIGN KEY (id_mrigo) REFERENCES blinov.mrigo (id_mrigo)')
-            db.engine.execute('ALTER TABLE blinov.vacancies_tv ADD CONSTRAINT vac_okpdtr_f_key FOREIGN KEY (id_okpdtr) REFERENCES blinov.okpdtr (id)')
+            db.engine.execute('ALTER TABLE vacs.vacancies_tv ADD PRIMARY KEY(id)')
+            db.engine.execute('ALTER TABLE vacs.vacancies_tv ADD CONSTRAINT vac_comp_f_key FOREIGN KEY (ogrn) REFERENCES vacs.companies_tv (ogrn)')
+            db.engine.execute('ALTER TABLE vacs.vacancies_tv ADD CONSTRAINT vac_mrigo_f_key FOREIGN KEY (id_mrigo) REFERENCES blinov.mrigo (id_mrigo)')
+            db.engine.execute('ALTER TABLE vacs.vacancies_tv ADD CONSTRAINT vac_okpdtr_f_key FOREIGN KEY (id_okpdtr) REFERENCES blinov.okpdtr (id)')
         except:
             s10 = f"Проблема с выгрузкой нового отношения 'Вакансии'. Продолжение работы."
-            db.engine.execute(sa.text("INSERT INTO blinov.tv_log (message) VALUES (:msg)").bindparams(msg=s10))
+            db.engine.execute(sa.text("INSERT INTO vacs.tv_log (message) VALUES (:msg)").bindparams(msg=s10))
             vacancies_counter = 0
             print(f">>> " + s10)
         else:
@@ -605,5 +611,5 @@ def main():
 if __name__ == "__main__":
     companies_counter, vacancies_counter = main()
     s0 = "Программа успешно завершила свою работу."
-    db.engine.execute(sa.text("INSERT INTO blinov.tv_log (exit_point, message, num_of_companies, num_of_vacancies) VALUES (:ep, :msg, :noc, :nov)").bindparams(ep=0, msg=s0, noc=companies_counter, nov=vacancies_counter))
+    db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message, num_of_companies, num_of_vacancies) VALUES (:ep, :msg, :noc, :nov)").bindparams(ep=0, msg=s0, noc=companies_counter, nov=vacancies_counter))
     print(f"\n> " + s0)
