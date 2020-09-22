@@ -122,15 +122,6 @@ def main():
             'vacancy.requirement.qualification': 'str',
         })
         
-        # TODO: переписать этот отвратительный кусок (!!!)
-        # for index, row in df_raw.iterrows():
-        #     df_raw.at[index, 'vacancy.addresses.address'] = re.sub(
-        #         "'location': |{|\[|lng': |'lat': |}|\]|\'", '', df_raw.at[index, 'vacancy.addresses.address'])
-        #     df_raw.at[index, 'vacancy.duty'] = remove_tags(
-        #         df_raw.at[index, 'vacancy.duty'])
-        #     df_raw.at[index, 'vacancy.requirement.qualification'] = remove_tags(
-        #         df_raw.at[index, 'vacancy.requirement.qualification'])
-        
         df_raw['vacancy.addresses.address'] = df_raw['vacancy.addresses.address'].apply(lambda s: re.sub("'location': |{|\[|lng': |'lat': |}|\]|\'", '', s))
         df_raw['vacancy.duty'] = df_raw['vacancy.duty'].apply(remove_tags)
         df_raw['vacancy.requirement.qualification'] = df_raw['vacancy.requirement.qualification'].apply(remove_tags)
@@ -140,11 +131,14 @@ def main():
         df_raw['download_time'] = pd.to_datetime('now')
         
         # выбираем ОГРН первичным ключом
+        df_raw['vacancy.company.ogrn'] = df_raw['vacancy.company.ogrn'].str.strip()
+        df_raw['vacancy.company.ogrn'] = df_raw['vacancy.company.ogrn'].replace(['nan', 'NaN', 'Nan', 'naN', 'nAn', ''], np.nan)
         df_raw = df_raw[pd.notnull(df_raw['vacancy.company.ogrn'])]
         df_raw = df_raw.drop_duplicates(
             subset="vacancy.id",
             keep='last'
-            )
+        )
+        # df_raw.to_csv('df_raw.csv', index=False)
     except:
         s3 = "Проблемы с исходным датафреймом (df_raw). Завершение работы."
         db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=3, msg=s3))
@@ -372,12 +366,6 @@ def main():
             'kpp': 'str',
         })
         
-        # TODO: переписать этот отвратительный кусок (!!!)
-        # for index, row in companies_diff.iterrows():
-        #     companies_diff.at[index, 'inn'] = re.split(r'[.]', companies_diff.at[index, 'inn'])[0]
-        #     companies_diff.at[index, 'ogrn'] = re.split(r'[.]', companies_diff.at[index, 'ogrn'])[0]
-        #     companies_diff.at[index, 'kpp'] = re.split(r'[.]', companies_diff.at[index, 'kpp'])[0]
-        
         companies_diff['inn'] = companies_diff['inn'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
         companies_diff['ogrn'] = companies_diff['ogrn'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
         companies_diff['kpp'] = companies_diff['kpp'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
@@ -385,6 +373,7 @@ def main():
         companies_diff = companies_diff.replace({'nan': np.nan})
         if not companies_diff.empty:
             try:
+                # companies_diff.to_csv('companies_diff.csv', index=False)
                 companies_counter = companies_diff.shape[0]
                 print(f">> Число новых компаний для обновления -- {companies_counter}")
                 companies_diff.to_sql(
@@ -410,11 +399,11 @@ def main():
                     })
                 db.engine.execute('INSERT INTO vacs.companies_tv (ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email) SELECT ogrn, inn, kpp, companycode, name, address, hr_agency, url, site, phone, fax, email FROM vacs.companies_tv_tmp ON CONFLICT (ogrn) DO NOTHING;')
                 db.engine.execute('DROP TABLE vacs.companies_tv_tmp;')
-            except:
+            except Exception as e:
                 s7 = "Проблема с обновлением отношения 'Компании'. Продолжение работы."
                 db.engine.execute(sa.text("INSERT INTO vacs.tv_log (message) VALUES (:msg)").bindparams(msg=s7))
                 companies_counter = 0
-                print(f">>> " + s7)
+                print(f">>> " + s7 + str(e))
             else:
                 print(f">> Выгрузка новых данных в таблицу 'Компании' завершена.")
         else:
@@ -428,17 +417,12 @@ def main():
                 'kpp' : 'str',
                 })
             
-            # TODO: переписать этот отвратительный кусок (!!!)
-            # for index, row in companies.iterrows():
-            #     companies.at[index, 'inn'] = re.split(r'[.]', companies.at[index, 'inn'])[0]
-            #     companies.at[index, 'ogrn'] = re.split(r'[.]', companies.at[index, 'ogrn'])[0]
-            #     companies.at[index, 'kpp'] = re.split(r'[.]', companies.at[index, 'kpp'])[0]
-            
             companies['inn'] = companies['inn'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             companies['ogrn'] = companies['ogrn'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             companies['kpp'] = companies['kpp'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             
             companies = companies.replace({'nan' : np.nan})
+            # companies.to_csv('companies.csv', index=False)
             companies_counter = companies.shape[0]
             print(f">> Число новых компаний для загрузки -- {companies_counter}")
             companies.to_sql(
@@ -499,13 +483,6 @@ def main():
             'id_okpdtr': 'str',
         })
         
-        # TODO: переписать этот отвратительный кусок (!!!)
-        # for index, row in vacancies_diff.iterrows():
-        #     vacancies_diff.at[index, 'region_code'] = re.split(r'[.]', vacancies_diff.at[index, 'region_code'])[0]
-        #     vacancies_diff.at[index, 'ogrn'] = re.split(r'[.]', vacancies_diff.at[index, 'ogrn'])[0]
-        #     vacancies_diff.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies_diff.at[index, 'id_mrigo'])[0]
-        #     vacancies_diff.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies_diff.at[index, 'id_okpdtr'])[0]
-        
         vacancies_diff['region_code'] = vacancies_diff['region_code'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
         vacancies_diff['ogrn'] = vacancies_diff['ogrn'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
         vacancies_diff['id_mrigo'] = vacancies_diff['id_mrigo'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
@@ -514,6 +491,7 @@ def main():
         
         if not vacancies_diff.empty:
             try:
+                # vacancies_diff.to_csv('vacancies_diff.csv', index=False)
                 vacancies_counter = vacancies_diff.shape[0]
                 print(f">> Число новых вакансий для загрузки -- {vacancies_counter}")
                 vacancies_diff.to_sql(
@@ -574,19 +552,12 @@ def main():
                 'id_okpdtr' : 'str',
                 })
             
-            # TODO: переписать этот отвратительный кусок (!!!)
-            # for index, row in vacancies.iterrows():
-            #     vacancies.at[index, 'region_code'] = re.split(r'[.]', vacancies.at[index, 'region_code'])[0]
-            #     vacancies.at[index, 'ogrn'] = re.split(r'[.]', vacancies.at[index, 'ogrn'])[0]
-            #     vacancies.at[index, 'id_mrigo'] = re.split(r'[.]', vacancies.at[index, 'id_mrigo'])[0]
-            #     vacancies.at[index, 'id_okpdtr'] = re.split(r'[.]', vacancies.at[index, 'id_okpdtr'])[0]
-            
             vacancies['region_code'] = vacancies['region_code'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             vacancies['ogrn'] = vacancies['ogrn'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             vacancies['id_mrigo'] = vacancies['id_mrigo'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             vacancies['id_okpdtr'] = vacancies['id_okpdtr'].apply(lambda s: re.split(r'[.]', s)[0] if not pd.isna(s) else s)
             vacancies = vacancies.replace({'nan' : np.nan})
-            
+            # vacancies.to_csv('vacancies.csv', index=False)
             vacancies_counter = vacancies.shape[0]
             print(f">> Число новых вакансий для загрузки -- {vacancies_counter}")
             vacancies.to_sql(
