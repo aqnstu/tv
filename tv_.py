@@ -201,7 +201,9 @@ def main():
             'vacancy.salary_min', 'vacancy.salary_max', 'vacancy.salary', 'vacancy.currency',
             'vacancy.vac_url',
             'vacancy.category.industry',
-            'vacancy.creation-date', 'vacancy.modify-date', 'download_time',
+            'vacancy.creation-date',
+            # 'vacancy.modify-date',
+            'download_time',
             ]]
 
         vacancies = vacancies.rename(columns={
@@ -228,15 +230,15 @@ def main():
             'vacancy.vac_url': 'vac_url',
             'vacancy.category.industry': 'industry',
             'vacancy.creation-date': 'creation_date_from_api',
-            'vacancy.modify-date': 'modify_date_from_api',
+            # 'vacancy.modify-date': 'modify_date_from_api',
         })
         vacancies['is_closed'] = False
         vacancies['closing_time'] = np.nan
         print(">> Новое отношение 'Вакансии' успешно сформированно.")
-    except:
+    except Exception as e:
         s5 = "Проблема с формированием отношения 'Вакансии'. Завершение работы."
         db.engine.execute(sa.text("INSERT INTO vacs.tv_log (exit_point, message) VALUES (:ep, :msg)").bindparams(ep=5, msg=s5))
-        print(f">>> " + s5)
+        print(f">>> " + s5 + ': '+ str(e))
         sys.exit(5)
 
     ########################################################################################################
@@ -526,12 +528,12 @@ def main():
                         'currency' : sa.String,
                         'vac_url' : sa.String,
                         'creation_date_from_api' : sa.DateTime,
-                        'modify_date_from_api' : sa.DateTime,
+                        # 'modify_date_from_api' : sa.DateTime,
                         'download_time': sa.DateTime,
                         'is_closed': sa.Boolean,
                         'closing_time': sa.DateTime,
                     })
-                db.engine.execute('INSERT INTO vacs.vacancies_tv (id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed, closing_time) SELECT id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, modify_date_from_api, download_time, is_closed, closing_time FROM vacs.vacancies_tv_tmp ON CONFLICT (id) DO NOTHING;')
+                db.engine.execute('INSERT INTO vacs.vacancies_tv (id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, download_time, is_closed, closing_time) SELECT id, ogrn, source, region_code, address, id_mrigo, experience, employment, schedule, job_name, id_okpdtr, specialisation, duty, education, qualification, term_text, social_protected, salary_min, salary_max, salary, currency, vac_url, creation_date_from_api, download_time, is_closed, closing_time FROM vacs.vacancies_tv_tmp ON CONFLICT (id) DO NOTHING;')
                 db.engine.execute('DROP TABLE vacs.vacancies_tv_tmp;')
             except Exception as e:
                 s9 = "Проблема с обновлением отношения 'Вакансии'. Продолжение работы."
@@ -592,7 +594,7 @@ def main():
                     'currency' : sa.String,
                     'vac_url' : sa.String,
                     'creation_date_from_api' : sa.DateTime,
-                    'modify_date_from_api' : sa.DateTime,
+                    # 'modify_date_from_api' : sa.DateTime,
                     'download_time': sa.DateTime,
                     'is_closed': sa.Boolean,
                     'closing_time': sa.DateTime,
